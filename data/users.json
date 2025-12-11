@@ -1,0 +1,16 @@
+[
+  {
+    "id": "u_1",
+    "username": "bee",
+    "email": "bee@example.com",
+    "password": "hashed123",
+    "subscription": "premium"
+  },
+  {
+    "id": "u_2",
+    "username": "courage",
+    "email": "courage@example.com",
+    "password": "hashed456",
+    "subscription": "free"
+  }
+]

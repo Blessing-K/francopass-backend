@@ -1,0 +1,16 @@
+[
+  {
+    "id": "r_1",
+    "title": "DELF B2 Oral Tips",
+    "instructor": "Mme. Dubois",
+    "link": "https://example.com/delf-b2-oral",
+    "description": "Strategies for Part 1 and 2."
+  },
+  {
+    "id": "r_2",
+    "title": "TCF Listening Crash",
+    "instructor": "M. Martin",
+    "link": "https://example.com/tcf-crash",
+    "description": "Practice with timing."
+  }
+]

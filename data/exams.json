@@ -1,0 +1,25 @@
+[
+  {
+    "id": "ex_1",
+    "examType": "DELF B2",
+    "sections": [
+      "Listening",
+      "Reading",
+      "Writing",
+      "Speaking"
+    ],
+    "difficulty": "B2",
+    "timer": 1500
+  },
+  {
+    "id": "ex_2",
+    "examType": "TCF",
+    "sections": [
+      "Listening",
+      "Grammar",
+      "Reading"
+    ],
+    "difficulty": "B1-B2",
+    "timer": 1200
+  }
+]

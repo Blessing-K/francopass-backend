@@ -1,0 +1,14 @@
+[
+  {
+    "id": "v_1",
+    "word": "bonjour",
+    "translation": "hello",
+    "category": "greetings"
+  },
+  {
+    "id": "v_2",
+    "word": "pomme",
+    "translation": "apple",
+    "category": "food"
+  }
+]
