@@ -26,12 +26,20 @@ const createTransporter = async () => {
 
     let accessToken;
     try {
-      const tokenResponse = await oAuth2Client.getAccessToken();
+      // Set a reasonable timeout for token fetch
+      const tokenPromise = oAuth2Client.getAccessToken();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("OAuth2 token request timeout after 10s")), 10000)
+      );
+      const tokenResponse = await Promise.race([tokenPromise, timeoutPromise]);
       accessToken = tokenResponse?.token || tokenResponse;
+      console.log("Successfully obtained Google OAuth2 access token");
     } catch (err) {
       console.error(
         "Failed to obtain Google access token:",
-        err?.message || err
+        err?.message || err,
+        "\nClient ID:", process.env.GOOGLE_CLIENT_ID?.substring(0, 20) + "...",
+        "\nSMTP User:", process.env.SMTP_USER
       );
       throw err;
     }
