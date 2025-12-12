@@ -7,56 +7,62 @@ import { google } from "googleapis";
 const generateOTP = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
 
-const createTransporter = async () => {
-  // If Google OAuth2 credentials are provided, prefer using Gmail via OAuth2.
-  // This works on platforms that block SMTP ports (e.g., Render free tier).
+/**
+ * Send email using Gmail API (HTTP-based, no SMTP ports needed)
+ * Works on platforms that block SMTP ports like Render free tier
+ */
+const sendEmailViaGmailAPI = async (to, subject, text) => {
   if (
-    process.env.GOOGLE_CLIENT_ID &&
-    process.env.GOOGLE_CLIENT_SECRET &&
-    process.env.GOOGLE_REFRESH_TOKEN &&
-    process.env.SMTP_USER
+    !process.env.GOOGLE_CLIENT_ID ||
+    !process.env.GOOGLE_CLIENT_SECRET ||
+    !process.env.GOOGLE_REFRESH_TOKEN ||
+    !process.env.SMTP_USER
   ) {
-    const oAuth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET
-    );
-    oAuth2Client.setCredentials({
-      refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
-    });
-
-    let accessToken;
-    try {
-      // Set a reasonable timeout for token fetch
-      const tokenPromise = oAuth2Client.getAccessToken();
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("OAuth2 token request timeout after 10s")), 10000)
-      );
-      const tokenResponse = await Promise.race([tokenPromise, timeoutPromise]);
-      accessToken = tokenResponse?.token || tokenResponse;
-      console.log("Successfully obtained Google OAuth2 access token");
-    } catch (err) {
-      console.error(
-        "Failed to obtain Google access token:",
-        err?.message || err,
-        "\nClient ID:", process.env.GOOGLE_CLIENT_ID?.substring(0, 20) + "...",
-        "\nSMTP User:", process.env.SMTP_USER
-      );
-      throw err;
-    }
-
-    return nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        type: "OAuth2",
-        user: process.env.SMTP_USER,
-        clientId: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
-        accessToken,
-      },
-    });
+    throw new Error("Gmail API credentials not configured");
   }
 
+  const oAuth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  oAuth2Client.setCredentials({
+    refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+  });
+
+  const gmail = google.gmail({ version: "v1", auth: oAuth2Client });
+
+  // Construct RFC 2822 formatted email
+  const emailLines = [
+    `From: ${process.env.EMAIL_FROM || process.env.SMTP_USER}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    "",
+    text,
+  ];
+  const email = emailLines.join("\r\n");
+
+  // Encode in base64url format (Gmail API requirement)
+  const encodedEmail = Buffer.from(email)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  // Send via Gmail API
+  const result = await gmail.users.messages.send({
+    userId: "me",
+    requestBody: {
+      raw: encodedEmail,
+    },
+  });
+
+  return result.data;
+};
+
+/**
+ * Fallback: Create nodemailer transporter for SMTP or Ethereal test accounts
+ */
+const createTransporter = async () => {
   // If SMTP credentials are provided, use them. Otherwise create an Ethereal test account for local dev.
   if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
     const port = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 587;
@@ -112,56 +118,76 @@ export const login = async (req, res) => {
     await user.save();
 
     // Send OTP via email
-    const transporter = await createTransporter();
-    const mailOptions = {
-      from: process.env.EMAIL_FROM || "no-reply@francopass.local",
-      to: user.email,
-      subject: "Your FrancoPass OTP",
-      text: `Your OTP is ${otp}. It expires in 5 minutes.`,
-    };
-
-    // Verify transporter before sending (helps surface SMTP config issues)
-    try {
-      await transporter.verify();
-    } catch (err) {
-      console.error("SMTP verification failed:", err?.message || err);
-      return res.status(500).json({
-        error: "SMTP verification failed",
-        details: err?.message || String(err),
-      });
-    }
-
     let info;
-    try {
-      info = await transporter.sendMail(mailOptions);
-    } catch (err) {
-      console.error("Failed sending OTP email:", err?.message || err);
-      // Return useful info to the client in development to aid debugging
-      if (
-        process.env.NODE_ENV !== "production" ||
-        process.env.DEV_SHOW_OTP === "true"
-      ) {
-        return res.status(500).json({
-          error: "Failed sending OTP email",
-          details: err?.message || String(err),
-          otp,
-        });
+    let isGmailAPI = false;
+
+    // Try Gmail API first (works on Render free tier - no SMTP ports needed)
+    if (
+      process.env.GOOGLE_CLIENT_ID &&
+      process.env.GOOGLE_CLIENT_SECRET &&
+      process.env.GOOGLE_REFRESH_TOKEN &&
+      process.env.SMTP_USER
+    ) {
+      try {
+        console.log("Sending email via Gmail API...");
+        const result = await sendEmailViaGmailAPI(
+          user.email,
+          "Your FrancoPass OTP",
+          `Your OTP is ${otp}. It expires in 5 minutes.`
+        );
+        console.log("Email sent successfully via Gmail API:", result.id);
+        isGmailAPI = true;
+      } catch (err) {
+        console.error("Gmail API failed:", err?.message || err);
+        // If Gmail API fails, fall through to SMTP fallback
       }
-      return res.status(500).json({ error: "Failed sending OTP email" });
     }
 
-    const isTestPreview = info && nodemailer.getTestMessageUrl(info);
-    // Only include the OTP in the response when explicitly requested (DEV_SHOW_OTP=true)
-    // or when using a test mail provider like Ethereal (no real email delivery available).
-    const showOtp =
-      process.env.DEV_SHOW_OTP === "true" || Boolean(isTestPreview);
+    // Fallback to SMTP if Gmail API not configured or failed
+    if (!isGmailAPI) {
+      try {
+        console.log("Falling back to SMTP...");
+        const transporter = await createTransporter();
+        const mailOptions = {
+          from: process.env.EMAIL_FROM || "no-reply@francopass.local",
+          to: user.email,
+          subject: "Your FrancoPass OTP",
+          text: `Your OTP is ${otp}. It expires in 5 minutes.`,
+        };
+
+        // Verify transporter before sending
+        await transporter.verify();
+        info = await transporter.sendMail(mailOptions);
+        console.log("Email sent successfully via SMTP");
+      } catch (err) {
+        console.error("SMTP also failed:", err?.message || err);
+        // Return useful info to the client in development
+        if (
+          process.env.NODE_ENV !== "production" ||
+          process.env.DEV_SHOW_OTP === "true"
+        ) {
+          return res.status(500).json({
+            error: "Failed sending OTP email",
+            details: err?.message || String(err),
+            otp,
+          });
+        }
+        return res.status(500).json({ error: "Failed sending OTP email" });
+      }
+    }
 
     const response = {
       message: "OTP sent to registered email",
       email: user.email,
     };
+
+    // Only include the OTP in the response when explicitly requested (DEV_SHOW_OTP=true)
+    // or when using a test mail provider like Ethereal
+    const isTestPreview = info && nodemailer.getTestMessageUrl(info);
+    const showOtp =
+      process.env.DEV_SHOW_OTP === "true" || Boolean(isTestPreview);
+
     if (showOtp) response.otp = otp;
-    // If nodemailer test account used, return preview URL to view message
     if (isTestPreview) {
       response.previewUrl = nodemailer.getTestMessageUrl(info);
     }
@@ -237,9 +263,29 @@ export const debugSmtp = async (req, res) => {
     return res.status(404).json({ error: "Not found" });
 
   try {
+    // Test Gmail API if configured
+    if (
+      process.env.GOOGLE_CLIENT_ID &&
+      process.env.GOOGLE_CLIENT_SECRET &&
+      process.env.GOOGLE_REFRESH_TOKEN &&
+      process.env.SMTP_USER
+    ) {
+      const result = await sendEmailViaGmailAPI(
+        process.env.SMTP_USER,
+        "FrancoPass Email Test",
+        "This is a test email from the Gmail API."
+      );
+      return res.json({
+        ok: true,
+        method: "Gmail API",
+        messageId: result.id,
+      });
+    }
+
+    // Fallback to SMTP test
     const transporter = await createTransporter();
     await transporter.verify();
-    return res.json({ ok: true, message: "SMTP verified" });
+    return res.json({ ok: true, method: "SMTP", message: "SMTP verified" });
   } catch (err) {
     return res
       .status(500)

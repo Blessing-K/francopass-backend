@@ -33,12 +33,17 @@
 ### How to configure
 
 - Set environment variables in `.env`.
-  - For Gmail OAuth2 (recommended on platforms that block SMTP ports, e.g. Render free tier):
+  - For **Gmail API** (recommended - works on Render free tier and platforms that block SMTP ports):
     - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, and `SMTP_USER` (the Gmail address used to send).
+    - Gmail API must be enabled in Google Cloud Console.
+    - OAuth2 consent screen must include your email as a test user.
+    - Refresh token must be generated with `https://mail.google.com/` scope.
   - Alternatively (legacy SMTP fallback): `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `EMAIL_FROM`.
-- Install new dependencies: run `npm install` in `francopass-backend`.
+- Install dependencies: run `npm install` in `francopass-backend`.
 
 ### Notes
 
-- OTPs expire after 5 minutes. The backend sends emails using the configured SMTP server (Ethereal or real SMTP).
+- OTPs expire after 5 minutes.
+- Email sending priority: Gmail API (HTTP, no SMTP ports) → SMTP fallback → Ethereal test account.
+- Gmail API bypasses SMTP port restrictions on free hosting platforms like Render.
 - The frontend stores the JWT in `localStorage` and attaches it as a `Bearer` token to API requests.
